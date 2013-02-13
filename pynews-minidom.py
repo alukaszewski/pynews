@@ -22,11 +22,12 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301 USA.
 
-import feedparser
 import MySQLdb
 import re
 
 from datetime import datetime
+from urllib2 import urlopen
+from xml.dom import minidom
 
 # Read in list of feeds
 rssFile = 'rssfeeds.tsv'
@@ -46,10 +47,44 @@ whitespacers = re.compile('([:,;.!?\s\)\(])')
 
 # Define the database access credentials
 dbhost = "localhost"
-dbuser = "root"
-dbpass = "r00tp4ss"
+dbuser = "rootbeer"
+dbpass = "s0m3p4ss"
 dbdb = "pynews"
 
+def getItems(feed):
+    """
+    Receives lines of RSS feed to build and parse the dom and return
+    all items out of the file as well as the time of retrieval.
+    """
+
+    retrieval = datetime.now()
+    data = feed.read().replace('\n', '')   
+    dom = minidom.parseString(data)
+
+    channels = dom.getElementsByTagName("channel")[0]
+    items = channels.getElementsByTagName("item")
+
+    return items, retrieval
+
+def getData(item):
+    """
+    Receives RSS item (item), parses it, and returns the item's title
+    (title), URL (link), and publication date (pubdate), if available.
+    """
+
+    title = item.getElementsByTagName("title")[0].childNodes[0].data
+    link =  item.getElementsByTagName("link")[0].childNodes[0].data
+
+    # The 'description' tag is unreliable as it is not always used for
+    # descriptions.  It can sometimes contain 'comments' (e.g., Hacker
+    # News) 
+    # desc = item.getElementsByTagName("description")[0].childNodes[0].data
+
+    try: # Get publication date
+        pubdate = item.getElementsByTagName("pubDate")[0].childNodes[0].data
+    except: # If publication date is not available, note so
+        pubdate = "not available"
+    return title, link, pubdate
 
 def getKeywords(title):
     """
@@ -86,23 +121,20 @@ def main():
     for line in feedFile:
         lines = line.split('\t')
         feedname = lines[0].strip()
-        feed = feedparser.parse(lines[1])
-        feedretrieved = datetime.now()
+        feed = urlopen(lines[1])
+        items, feedretrieved = getItems(feed)
+
         feeddeleted = 0
 
-        for item in feed['items']:
-            title = item.title
-            link = item.link
-            try:
-                pubdate = item.published
-            except:
-                pubdate = "none specified"
+        for item in items:
+            title, link, pubdate = getData(item)
             itemposted = str(datetime.now())
             feedname = feedname.encode("utf-8")
             title = title.encode("utf-8")
             link = link.encode("utf-8")
             pubdate = pubdate.encode("utf-8")
             keywords = getKeywords(title)
+            # values = (feedname, title, link, pubdate)
 
             print("Feed Name: " + feedname)
             print("Title: " + title)
@@ -120,6 +152,8 @@ def main():
                 except:
                     pass
 
+            # statement = """INSERT INTO feeditems(feedname,title,url,pubdate) values("%s", "%s", "%s", "%s")""" %(feedname, title, link, pubdate)
+            # print "\n\n" + statement + "\n\n"
             cursor.execute("""INSERT INTO feeditems(feedname,title,url,pubdate,keywords,itemposted, feedretrieved) values("%s", "%s", "%s", "%s", "%s", "%s", "%s")""", (feedname, title, link, pubdate, keywords, itemposted, feedretrieved))
 
             db.commit()
